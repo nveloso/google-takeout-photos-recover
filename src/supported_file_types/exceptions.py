@@ -1,0 +1,2 @@
+class ExifWriterError(Exception):
+    pass
