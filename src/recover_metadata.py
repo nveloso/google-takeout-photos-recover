@@ -59,7 +59,9 @@ class Metadata:
             mime_type = magic.from_file(media_file, mime=True)
             valid_extensions = Metadata._MIME_TYPES_MAP.get(mime_type)
             if not valid_extensions:
-                tqdm.write(f'Mime type {mime_type} is not supported. Skipping metadata file {metadata_file}')
+                tqdm.write(f'Mime type {mime_type} is not supported. Skipping metadata file {metadata_file}. '
+                           f'Saving image/video file to output folder')
+                Metadata._copy_file(media_file, output_filepath)
                 continue
 
             output_dir = os.path.dirname(output_filepath)
@@ -189,7 +191,10 @@ class Metadata:
 
     @staticmethod
     def _copy_file(source: str, destination: str) -> None:
-        shutil.copy2(source, destination)
+        output_dir_name = os.path.dirname(destination)
+        if not os.path.isdir(output_dir_name):
+            os.makedirs(output_dir_name)
+        shutil.copy2(source, os.path.normpath(destination))
 
     @staticmethod
     def _get_output_filename(root_folder: str, output_folder: str, image_path: str) -> str:
