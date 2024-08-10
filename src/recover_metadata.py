@@ -106,20 +106,19 @@ class Metadata:
 
         # Let's validate if we did not miss any metadata file
         metadata_files = set(files_with_metadata.values())
-        assert len(files_with_metadata.values()) == len(metadata_files)
         for path in glob.glob(f'{root_folder}/**', recursive=True):
             if not os.path.isfile(path):
                 continue
 
             extension = os.path.splitext(path)[1]
             if extension == '.json' and path not in metadata_files:
-                print(f'Cannot find associated image/video file with {path}')
+                tqdm.write(f'Cannot find associated image/video file with {path}')
 
         return files_with_metadata
 
     @staticmethod
-    def _get_metadata_files(files: list[str]) -> dict[str, str]:
-        """Find metadata file associated with a given file"""
+    def _get_metadata_files(files: list[str]) -> dict[str, str | None]:
+        """Find metadata file associated with a given file. Associate None if no metadata was found for a given file"""
         files_with_metadata = {}
         for file in files:
             # Let's check if the metadata file is just appending the .json extension
@@ -141,7 +140,8 @@ class Metadata:
             parts = re.split(r'(\(\d+\))$', filename, maxsplit=1)
             if len(parts) != 3:
                 if not Metadata._is_live_photo(file):
-                    print(f'Cannot find metadata for {file}')
+                    tqdm.write(f'Cannot find metadata for {file}')
+                files_with_metadata[file] = None
                 continue
             metadata_file = f'{parts[0]}{extension}{parts[1]}.json'
             if os.path.isfile(metadata_file):
@@ -149,7 +149,8 @@ class Metadata:
                 files_with_metadata[file] = metadata_file
                 continue
             if not Metadata._is_live_photo(file):
-                print(f'Cannot find metadata for {file}')
+                tqdm.write(f'Cannot find metadata for {file}')
+            files_with_metadata[file] = None
         return files_with_metadata
 
     @staticmethod
