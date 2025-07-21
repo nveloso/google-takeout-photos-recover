@@ -1,3 +1,4 @@
+import os.path
 import subprocess
 from datetime import datetime
 
@@ -11,6 +12,10 @@ class JPGWriter(ExifWriter):
 
     @staticmethod
     def write(source_filepath: str, output_filepath: str, metadata: dict) -> None:
+
+        if os.path.exists(output_filepath):
+            os.remove(output_filepath)
+
         exif_args = JPGWriter._get_exif_args(source_filepath, output_filepath, metadata)
         try:
             subprocess.run(exif_args, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)

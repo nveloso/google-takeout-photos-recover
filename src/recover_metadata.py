@@ -3,6 +3,7 @@ import json
 import os
 import re
 import shutil
+from concurrent.futures.thread import ThreadPoolExecutor
 
 import magic
 from tqdm import tqdm
@@ -32,11 +33,12 @@ class Metadata:
         'image/png': ['.png'],
         'image/webp': ['.webp'],
         'image/gif': ['.gif'],
-        'video/mp4': ['.mp4']
+        'video/mp4': ['.mp4'],
+        'video/quicktime': ['.mp4']
     }
 
     @staticmethod
-    def recover(root_folder: str, output_folder: str) -> None:
+    def recover(root_folder: str, output_folder: str, worker: int=10) -> None:
         """
         Given a root_folder it will associate all files (images and videos) to their associated metadata file.
         After it will write the EXIF metadata present in the metadata file to the image/video file writing the new file
@@ -45,12 +47,12 @@ class Metadata:
         files_with_metadata = Metadata._get_files_with_metadata(root_folder)
         print(f'{len(files_with_metadata)} file(s) to recover metadata')
 
-        for media_file, metadata_file in tqdm(files_with_metadata.items()):
+        def process_media_file(media_file, metadata_file, root_folder, output_folder):
             output_filepath = Metadata._get_output_filename(root_folder, output_folder, media_file)
             if metadata_file is None:
                 tqdm.write(f'Skipping {media_file} as there is no metadata associated. Saving to output folder')
                 Metadata._copy_file(media_file, output_filepath)
-                continue
+                return
 
             tqdm.write(f'Recovering {media_file}')
             with open(metadata_file) as f:
@@ -62,7 +64,7 @@ class Metadata:
                 tqdm.write(f'Mime type {mime_type} is not supported. Skipping metadata file {metadata_file}. '
                            f'Saving image/video file to output folder')
                 Metadata._copy_file(media_file, output_filepath)
-                continue
+                return
 
             output_dir = os.path.dirname(output_filepath)
             if not os.path.exists(output_dir):
@@ -96,6 +98,10 @@ class Metadata:
             creation_timestamp = int(metadata['creationTime']['timestamp'])
             os.utime(output_filepath, (creation_timestamp, creation_timestamp))
 
+        with ThreadPoolExecutor(max_workers=worker) as executor:
+            for media_file, metadata_file in files_with_metadata.items():
+                executor.submit(process_media_file, media_file, metadata_file, root_folder, output_folder)
+
         print('Recovery of metadata completed')
 
     @staticmethod
@@ -122,7 +128,7 @@ class Metadata:
         files_with_metadata = {}
         for file in files:
             # Let's check if the metadata file is just appending the .json extension
-            metadata_file = Metadata._sanitize_metadata_filename(f'{file}.json')
+            metadata_file = Metadata._fuzzy_metadata_filename(file)
             if os.path.isfile(metadata_file):
                 assert file not in files_with_metadata
                 files_with_metadata[file] = metadata_file
@@ -172,6 +178,65 @@ class Metadata:
         filepath = os.path.splitext(file)[0]
         filename = f'{os.path.basename(filepath)}.json'
         return os.path.join(os.path.dirname(filepath), Metadata._sanitize_metadata_filename(filename))
+
+    @staticmethod
+    def _fuzzy_metadata_filename(file: str) -> str:
+        dirpath = os.path.dirname(file)
+        filename = os.path.basename(file)
+
+        match = re.search(r'^(.*)?(\(\d+\))?\.(.*)?$', filename)
+        if match:
+            pure_name, version, suffix = match.group(1), match.group(2), match.group(3)
+        else:
+            return ''
+
+        if version is None:
+            match = re.search('(.+)(\(\d+\))$', pure_name)
+            if match:
+                pure_name, version = match.group(1), match.group(2)
+
+        expected_json_names = [filename,
+                               f'{filename}.supplemental-metadata',
+                               f'{pure_name}.{suffix}',
+                               f'{pure_name}.{suffix}.supplemental-metadata' + (f'{version}' if version else '')]
+
+        if pure_name.endswith('-edited') or pure_name.endswith('-edit'):
+            expected_json_names.append(f'{re.sub(r'(-edited|-edit)$', '', pure_name)}.{suffix}')
+            expected_json_names.append(
+                f'{re.sub(r'(-edited|-edit)$', '', pure_name)}.{suffix}.supplemental-metadata' + (
+                    f'{version}' if version else ''))
+
+        expected_json_names = [name[:46] for name in expected_json_names]
+
+        for name in expected_json_names:
+            metadata_files = glob.glob(f"{dirpath}/{name}.json", recursive=False)
+            if len(metadata_files) == 1:
+                return metadata_files[0]
+
+        expected_json_names = [f'{pure_name}.{suffix}.supplemental-metadata' + (f'{version}' if version else ''),
+                               f'{pure_name}.{suffix}.supplemental-metadata']
+
+        if suffix.lower() == 'mp4':
+            for alt_suffix in ['heic', 'mov', 'jpeg', 'jpg']:
+                expected_json_names.append(f'{pure_name}.{alt_suffix}.supplemental-metadata' + (f'{version}' if version else ''))
+                expected_json_names.append(f'{pure_name}.{alt_suffix}.supplemental-metadata')
+
+        expected_json_names.append(f'{pure_name}.*supplemental-metadata' + (f'{version}' if version else ''))
+        expected_json_names = [name[:46] for name in expected_json_names]
+
+        for name in expected_json_names:
+            metadata_files = glob.glob(f"{dirpath}/{name}.json", recursive=False)
+            if len(metadata_files) == 1:
+                return metadata_files[0]
+
+        expected_json_names = [name[:45] for name in expected_json_names]
+        for name in expected_json_names:
+            metadata_files = glob.glob(f"{dirpath}/{name}.json", recursive=False)
+            if len(metadata_files) == 1:
+                return metadata_files[0]
+
+        return ''
+
 
     @staticmethod
     def _sanitize_metadata_filename(metadata_file: str) -> str:
